@@ -1,0 +1,36 @@
+# ComfyUI serverless worker base (keeps /run + health checks)
+FROM registry.runpod.net/runpod-workers-worker-comfyui-main-dockerfile:160906f35
+
+# Optionally pin exact commits for reproducibility
+ARG WAN_REPO=https://github.com/kijai/ComfyUI-WanVideoWrapper
+ARG WAN_REF=main
+ARG VHS_REPO=https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
+ARG VHS_REF=main
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    COMFYUI_MODEL_PATH=/workspace/ComfyUI/models \
+    COMFYUI_CUSTOM_NODE_PATH=/workspace/ComfyUI/custom_nodes
+
+# OS deps + Python tooling + custom nodes + common video libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ffmpeg libavcodec-dev libavformat-dev libswscale-dev python3-pip \
+ && python3 -m pip install --no-cache-dir --upgrade pip \
+ && mkdir -p ${COMFYUI_MODEL_PATH} ${COMFYUI_CUSTOM_NODE_PATH} \
+ && cd ${COMFYUI_CUSTOM_NODE_PATH} \
+ && git clone --depth 1 --branch ${WAN_REF} ${WAN_REPO} ComfyUI-WanVideoWrapper \
+ && git clone --depth 1 --branch ${VHS_REF} ${VHS_REPO} ComfyUI-VideoHelperSuite \
+ # Common video tooling used by many nodes/pipelines
+ && python3 -m pip install --no-cache-dir opencv-python imageio[ffmpeg] moviepy \
+ # Optional: pytorchvideo (skip if you don't need it; --no-deps to avoid touching torch)
+ && python3 -m pip install --no-cache-dir pytorchvideo --no-deps || true \
+ # Install node-specific requirements if present
+ && for d in ComfyUI-WanVideoWrapper ComfyUI-VideoHelperSuite; do \
+      [ -f "$d/requirements.txt" ] && python3 -m pip install --no-cache-dir -r "$d/requirements.txt" || true; \
+    done \
+ # Clean
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /root/.cache/pip /tmp/* \
+ && find / -type d -name ".git" -prune -exec rm -rf {} +
+
+# IMPORTANT: do NOT override ENTRYPOINT/CMD (base image starts the serverless worker exposing /run)
